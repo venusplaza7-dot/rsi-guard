@@ -1,4 +1,3 @@
-{
-  "version": 2,
-  "builds": [{ "src": "api/index.py", "use": "@vercel/python" }]
-}
+lrsi-guard/
+   api/
+     index.py   <-- this file MUST be named exactly index.py
