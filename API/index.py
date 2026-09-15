@@ -1,4 +1,3 @@
-
 def handler(request):
     import json
     path = "/"
