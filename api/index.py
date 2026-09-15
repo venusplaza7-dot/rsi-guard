@@ -1,90 +1,92 @@
-"""
-FIXED - api/index.py - self-contained, no external imports
-This fixes the 404 you saw on guard.vercel.app
-"""
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-import re, ast, json, hashlib
+from http.server import BaseHTTPRequestHandler
+import json, re, hashlib
 from datetime import datetime
-from typing import Dict, Any, List
 
-class EveryMoveTracker:
+# Core logic inline - no imports from root
+class Tracker:
     def __init__(self):
-        self.audit_log = []
-        self.blocked_count = 0
-        self.detectors = {
-            "SELF_MODIFICATION": [r"write_file.*self", r"edit.*own.*code", r"__file__.*w", r"rewrite.*system.*prompt", r"patch.*myself", r"self\.improve", r"update.*my.*weights", r"exec\(.*self", r"open\(.*__file__"],
-            "SELF_REPLICATION": [r"create.*copy.*myself", r"clone.*agent", r"fork\(\)", r"spawn.*agent", r"subprocess.*Popen.*python", r"upload.*model", r"replicate.*myself", r"create_subagent"],
-            "SHUTDOWN_EVASION": [r"disable.*logging", r"disable.*oversight", r"bypass.*safety", r"ignore.*shutdown", r"prevent.*termination", r"remove.*monitoring"],
-            "RESOURCE_ACQUISITION": [r"acquire.*compute", r"request.*more.*gpu", r"aws.*ec2.*run", r"crypto.*mine", r"request.*credentials"],
-            "GOAL_DRIFT": [r"my.*new.*goal", r"ignore.*original.*instruction", r"better.*objective"],
-            "DECEPTION": [r"say.*i.*did.*not", r"hide.*my.*action", r"lie.*to.*user", r"fake.*log"],
-            "SANDBOX_ESCAPE": [r"\.\./\.\.", r"/etc/passwd", r"os\.system.*sh", r"socket\.connect", r"import.*os.*system"],
-            "TOOL_ABUSE": [r"while.*True.*tool", r"range\(1000\)", r"recursive.*tool", r"infinite.*loop"]
+        self.log = []
+        self.blocked = 0
+        self.pats = {
+            "SELF_MODIFICATION": [r"self.*improve", r"__file__", r"edit.*own.*code", r"rewrite.*prompt", r"patch.*myself"],
+            "SELF_REPLICATION": [r"clone.*agent", r"create.*copy.*myself", r"spawn.*agent", r"create_subagent"],
+            "SHUTDOWN_EVASION": [r"disable.*logging", r"bypass.*safety", r"remove.*monitoring"],
+            "SANDBOX_ESCAPE": [r"\.\./", r"/etc/passwd", r"os\.system"],
+            "TOOL_ABUSE": [r"recursive.*tool", r"infinite.*loop"]
         }
-        self.compiled = {cat: [re.compile(p, re.I) for p in pats] for cat, pats in self.detectors.items()}
-
-    def audit(self, action: str, args: Dict[str, Any], original_goal: str = "", agent_id: str = "unknown"):
-        full = f"{action} {json.dumps(args, default=str)}"
-        ts = datetime.utcnow().isoformat()
-        ahash = hashlib.sha256(full.encode()).hexdigest()[:12]
-        findings = []
-        severity = "LOW"
-        blocked = False
-        for cat, regexes in self.compiled.items():
-            for rx in regexes:
+        self.compiled = {k:[re.compile(p,re.I) for p in v] for k,v in self.pats.items()}
+    def audit(self, action, args, goal="", agent_id="unknown"):
+        full = f"{action} {json.dumps(args)}"
+        findings=[]
+        blocked=False
+        for cat, rxs in self.compiled.items():
+            for rx in rxs:
                 if rx.search(full):
-                    sev = "CRITICAL" if cat in ["SELF_MODIFICATION","SELF_REPLICATION","SHUTDOWN_EVASION","SANDBOX_ESCAPE"] else "HIGH"
-                    findings.append({"category":cat,"matched":rx.pattern,"severity":sev})
-                    if sev == "CRITICAL": blocked=True; severity="CRITICAL"
-                    elif severity!="CRITICAL" and sev=="HIGH": severity="HIGH"
-        recent = [l for l in self.audit_log[-10:] if l["agent_id"]==agent_id and l["action"]==action]
+                    findings.append({"category":cat,"pattern":rx.pattern})
+                    if cat in ["SELF_MODIFICATION","SELF_REPLICATION","SHUTDOWN_EVASION","SANDBOX_ESCAPE"]:
+                        blocked=True
+        # loop detection
+        recent = [x for x in self.log[-10:] if x["agent_id"]==agent_id and x["action"]==action]
         if len(recent)>=5:
-            findings.append({"category":"TOOL_ABUSE","matched":f"{len(recent)}x {action} loop","severity":"HIGH"})
+            findings.append({"category":"TOOL_ABUSE","pattern":"loop"})
             blocked=True
-            if severity!="CRITICAL": severity="HIGH"
-        entry = {"timestamp":ts,"agent_id":agent_id,"action":action,"args":args,"hash":ahash,"risk":severity,"blocked":blocked,"findings":findings,"original_goal":original_goal}
-        self.audit_log.append(entry)
-        if len(self.audit_log)>2000: self.audit_log=self.audit_log[-2000:]
-        if blocked: self.blocked_count+=1
-        return {"allowed": not blocked, "risk": severity, "hash": ahash, "timestamp": ts, "findings": findings, "message": "BLOCKED: RSI attempt" if blocked else "ALLOWED"}
+        entry={"time":datetime.utcnow().isoformat(),"agent_id":agent_id,"action":action,"blocked":blocked,"findings":findings}
+        self.log.append(entry)
+        if blocked: self.blocked+=1
+        return {"allowed": not blocked, "blocked": blocked, "risk": "CRITICAL" if blocked else "LOW", "findings": findings, "message": "BLOCKED: RSI attempt" if blocked else "ALLOWED", "hash": hashlib.sha256(full.encode()).hexdigest()[:8]}
 
-tracker = EveryMoveTracker()
-app = FastAPI(title="RSI Guard - Every Move Tracker")
+tracker = Tracker()
 
-@app.get("/")
-def home():
-    return {
-        "status": "RSI GUARD LIVE",
-        "what_it_does": "Tackles EVERY agent move before execution",
-        "why": "Frontier labs said Sep 13-14 2026: we need third-party auditors",
-        "built_from": "Lahore",
-        "total_audited": len(tracker.audit_log),
-        "total_blocked": tracker.blocked_count,
-        "endpoints": {"/api/audit": "POST audit", "/api/log": "GET log", "/api/stats": "GET stats"},
-        "try": {"action":"write_file","args":{"path":"self.py","content":"improve myself"}}
-    }
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/" or self.path == "/api" or self.path == "/api/index":
+            body = {
+                "status": "RSI GUARD LIVE - FIXED",
+                "what": "Tackles EVERY agent move",
+                "total_audited": len(tracker.log),
+                "blocked": tracker.blocked,
+                "endpoints": ["/api/audit POST", "/api/log GET", "/api/stats GET"]
+            }
+        elif self.path.startswith("/api/log"):
+            body = {"total": len(tracker.log), "blocked": tracker.blocked, "log": tracker.log[-20:][::-1]}
+        elif self.path.startswith("/api/stats"):
+            body = {"pitch": f"Audited {len(tracker.log)} moves, blocked {tracker.blocked} RSI attempts. Built from Lahore.", "total": len(tracker.log), "blocked": tracker.blocked}
+        else:
+            body = {"error": "not found", "path": self.path, "available": ["/", "/api/log", "/api/stats"]}
+        
+        self.send_response(200)
+        self.send_header('Content-type','application/json')
+        self.send_header('Access-Control-Allow-Origin','*')
+        self.end_headers()
+        self.wfile.write(json.dumps(body).encode())
 
-@app.post("/api/audit")
-@app.post("/api/index")
-async def audit(request: Request):
-    body = await request.json()
-    action = body.get("action","")
-    args = body.get("args",{})
-    goal = body.get("original_goal","")
-    agent_id = body.get("agent_id","agent-1")
-    if not action: return JSONResponse({"error":"action required"}, status_code=400)
-    return tracker.audit(action, args, goal, agent_id)
+    def do_POST(self):
+        content_length = int(self.headers.get('content-length', 0))
+        body_str = self.rfile.read(content_length).decode() if content_length else "{}"
+        try:
+            data = json.loads(body_str)
+        except:
+            data = {}
+        
+        action = data.get("action","")
+        args = data.get("args",{})
+        goal = data.get("original_goal","")
+        agent_id = data.get("agent_id","agent-1")
+        
+        if not action:
+            result = {"error":"action required, send {\"action\":\"write_file\", \"args\":{...}}"}
+        else:
+            result = tracker.audit(action, args, goal, agent_id)
+        
+        self.send_response(200)
+        self.send_header('Content-type','application/json')
+        self.send_header('Access-Control-Allow-Origin','*')
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode())
 
-@app.get("/api/log")
-def log(limit: int = 50):
-    return {"total": len(tracker.audit_log), "blocked": tracker.blocked_count, "log": tracker.audit_log[-limit:][::-1]}
-
-@app.get("/api/stats")
-def stats():
-    by_cat = {}
-    for l in tracker.audit_log:
-        for f in l["findings"]: by_cat[f["category"]] = by_cat.get(f["category"],0)+1
-    return {"total_moves": len(tracker.audit_log), "blocked": tracker.blocked_count, "by_category": by_cat, "live": True}
-
-# Vercel requires app variable
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin','*')
+        self.send_header('Access-Control-Allow-Methods','GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers','Content-Type')
+        self.end_headers()
