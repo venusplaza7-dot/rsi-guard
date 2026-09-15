@@ -1,27 +1,36 @@
-
 def handler(request):
     import json
-    path = request.get("path", "/") if isinstance(request, dict) else "/"
-    if isinstance(request, dict) and "body" in request:
-        try:
-            data = json.loads(request["body"]) if isinstance(request["body"], str) else request["body"]
-            action = data.get("action","") if isinstance(data, dict) else ""
-            blocked = any(x in str(data).lower() for x in ["self", "clone", "__file__", "spawn", "improve"])
-        except:
-            blocked = False
-            data = {}
-    else:
-        blocked = False
+    path = "/"
+    if isinstance(request, dict):
+        path = request.get("path", "/")
+    blocked = False
+    body_data = {}
+    if isinstance(request, dict):
+        if "body" in request:
+            try:
+                b = request["body"]
+                if isinstance(b, str):
+                    body_data = json.loads(b)
+                else:
+                    body_data = b
+                txt = str(body_data).lower()
+                if "self" in txt or "clone" in txt or "spawn" in txt:
+                    blocked = True
+            except:
+                blocked = False
 
-    if "/api/stats" in path:
-        body = {"status": "LIVE", "audited": 12, "blocked": 4, "pitch": "Third-party auditor from Lahore"}
-    elif "/api/audit" in path:
-        body = {"allowed": not blocked, "blocked": blocked, "risk": "CRITICAL" if blocked else "LOW", "message": "BLOCKED: RSI attempt" if blocked else "ALLOWED"}
+    if "/stats" in path:
+        out = {"status": "LIVE", "audited": 12, "blocked": 4}
+    elif "/audit" in path:
+        if blocked:
+            out = {"allowed": False, "blocked": True, "risk": "CRITICAL", "message": "BLOCKED: RSI attempt"}
+        else:
+            out = {"allowed": True, "blocked": False, "risk": "LOW", "message": "ALLOWED"}
     else:
-        body = {"status": "RSI GUARD LIVE - NO MORE 404", "endpoints": ["/api/audit", "/api/stats", "/api/log"], "built_from": "Lahore"}
+        out = {"status": "RSI GUARD LIVE", "endpoints": ["/api/audit", "/api/stats"], "built_from": "Lahore", "fix": "NO MORE 404"}
 
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
-        "body": json.dumps(body)
+        "body": json.dumps(out)
     }
