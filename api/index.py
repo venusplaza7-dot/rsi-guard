@@ -1,5 +1,5 @@
 def handler(request):
-    import json
+    
     path = "/"
     if isinstance(request, dict):
         path = request.get("path", "/")
